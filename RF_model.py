@@ -208,23 +208,38 @@ print("oob error:",1-rf_model.oob_score_)
 import time
 from multiprocessing.dummy import Pool as ThreadPool
 import threading
-start_yr = 2010
-end_yr = 2012
-interval = end_yr-start_yr+1
-n_var = 6
-x_predict = np.full((12*interval*n_var,len(grace.lat),len(grace.lon)),np.nan)
+from multiprocessing import Process
+from multiprocessing import Pool
 
-def predict(grace,ET,x_predict,start_yr,end_yr):
-    for i in range(len(grace.lat)):
-        for j in range(len(grace.lon)):
-            x_predict[:,i,j] = np.concatenate((grace.loc[str(start_yr):str(end_yr)][:,i,j],ET.loc[str(start_yr):str(end_yr)][:,i,j],
-                                EP.loc[str(start_yr):str(end_yr)][:,i,j],Pre.loc[str(start_yr):str(end_yr)][:,i,j],
-                                SM_Surf.loc[str(start_yr):str(end_yr)][:,i,j],NDVI.loc[str(start_yr):str(end_yr)][:,i,j]),axis=0)
-    return x_predict
+def compute_drought_probability(x_predict,n_var,interval,grace):
+    n = int(len(x_predict)/n_var)
+    # mon_id = 12 * 28 + 5 #2010-6
+    # mon_id = 12 * 29 + 5 #2011-6
+    drought_pro = np.full((12*interval,len(grace.lat),len(grace.lon)),np.nan)
+    for mon_id in range(12*interval):
+        for i in range(len(grace.lat)):
+            for j in range(len(grace.lon)):
+                X_predict = pd.DataFrame(np.array([x_predict[0:n,i,j][mon_id],x_predict[n:n*2,i,j][mon_id],
+                                                    x_predict[n*2:n*3,i,j][mon_id],x_predict[n*3:n*4,i,j][mon_id],
+                                                    x_predict[n*4:n*5,i,j][mon_id],x_predict[n*4:n*6,i,j][mon_id]])).T
+                X_predict.columns = ['Et','TWC','Ep','pre','SM_surf','ndvi']
+                try:
+                    drought_pro[mon_id,i,j] = rf_model.predict_proba(X_predict)[0][1]
+                except:
+                    drought_pro[mon_id,i,j] = np.nan
+    return drought_pro
 
-t = threading.Thread(target=predict,args=(grace,ET,x_predict,start_yr,end_yr))
-t.start()
-t.join()
+if __name__ == '__main__':
+    start_yr = 1982
+    end_yr = 2015
+    interval = end_yr-start_yr+1
+    n_var = 6
+    pool = Pool(8)
+    p = pool.apply_async(func=compute_drought_probability,args=(x_predict,n_var,interval,grace))
+    pool.close()
+    pool.join()
+    drought_pro = p.get()
+    
 #%% compute drought probability for <all of> grid
 
 n = int(len(x_predict)/n_var)
